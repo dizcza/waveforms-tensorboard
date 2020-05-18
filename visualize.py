@@ -9,30 +9,13 @@ import numpy as np
 import quantities as pq
 import torch
 from neo.io import BlackrockIO
+from neo.io.proxyobjects import SpikeTrainProxy
 from torch.utils.tensorboard import SummaryWriter
 
 
-def load_waveforms(per_unit=100, channels=[1], units='uV'):
+def load_reach_to_grasp_spiketrains():
     """
-    Loads spike waveforms from a session of Reach-to-Grasp data.
-
-    Parameters
-    ----------
-    per_unit : int
-        Num. of waveform samples to load per unit (neuron) for each channel.
-        The samples are chosen randomly.
-    channels : list
-        A list of channel IDs to extract the waveforms from. All IDs must not
-        succeed 96 - the total num. of channels in a Utah array.
-    units : {'uV', 'mV'}
-        The physical units to rescale the waveform amplitudes to.
-
-    Returns
-    -------
-    waveforms : (N, 36) torch.Tensor
-        2d array of `N` waveforms, each consisting of 36 time points.
-    channel_units : (N,) list
-        A list of (channel, unit) labels of size `N`.
+    Loads Rech-to-Grasp spiketrains.
     """
     datasets_dir = Path("datasets")
     assert datasets_dir.exists(), \
@@ -44,18 +27,46 @@ def load_waveforms(per_unit=100, channels=[1], units='uV'):
     session = BlackrockIO(filename=session_name, nsx_to_load=[],
                           nev_override=nev_override,
                           verbose=False)
+    segment = session.read_segment(lazy=True)
+    return segment.spiketrains
 
+
+def extract_waveforms(spiketrains, per_unit=500, channels=[1], units='uV'):
+    """
+    Loads spike waveforms from a session of Reach-to-Grasp data.
+
+    Parameters
+    ----------
+    spiketrains : list
+        A list of `SpikeTrain` or `SpikeTrainProxy` (lazy mode) to
+        extract the waveforms from.
+    per_unit : int
+        Num. of waveform samples to load per unit (neuron) for each channel.
+        The samples are chosen randomly.
+    channels : list
+        A list of channel IDs to extract the waveforms from. All IDs must not
+        succeed 96 - the total num. of channels in a Utah array.
+    units : {'uV', 'mV'}
+        The physical units to rescale the waveform amplitudes to.
+
+    Returns
+    -------
+    waveforms : (N, 38) torch.Tensor
+        2d array of `N` waveforms, each consisting of 38 time points.
+    channel_units : (N,) list
+        A list of (channel, unit) labels of size `N`.
+    """
     waveforms = []
     channel_units = []
-
-    segment = session.read_segment(lazy=True)
-    for spiketrain in segment.spiketrains:
+    for spiketrain in spiketrains:
         channel = int(spiketrain.annotations['channel_id'])
         unit_id = int(spiketrain.annotations['unit_id'])
         if channel not in channels:
             continue
-        spiketrain = spiketrain.load(time_slice=(10 * pq.s, 300 * pq.s),
-                                     load_waveforms=True)
+        if isinstance(spiketrain, SpikeTrainProxy):
+            # lazy mode
+            spiketrain = spiketrain.load(time_slice=(10 * pq.s, 300 * pq.s),
+                                         load_waveforms=True)
         waveform = spiketrain.waveforms
         wf_size = min(len(waveform), per_unit)
         select = np.random.choice(len(waveform), size=wf_size, replace=False)
@@ -93,8 +104,8 @@ def create_figures(waveforms: torch.Tensor):
 
     Parameters
     ----------
-    waveforms : (N, 36) torch.Tensor
-        2d array of `N` waveforms, each consisting of 36 time points.
+    waveforms : (N, 38) torch.Tensor
+        2d array of `N` waveforms, each consisting of 38 time points.
 
     Returns
     -------
@@ -119,7 +130,8 @@ def plot_embeddings():
     """
     The main function to visualize waveforms in TensorBoard.
     """
-    waveforms, channel_units = load_waveforms(per_unit=500, channels=[79])
+    spiketrains = load_reach_to_grasp_spiketrains()
+    waveforms, channel_units = extract_waveforms(spiketrains, channels=[79])
     label_img = create_figures(waveforms)
     print(label_img.shape)
     if isinstance(channel_units[0], int):
@@ -134,6 +146,7 @@ def plot_embeddings():
                          label_img=label_img,
                          metadata_header=label_names)
     writer.close()
+    print("Done. Now open a terminal and run 'tensorboard --logdir=runs'")
 
 
 if __name__ == '__main__':

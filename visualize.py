@@ -1,6 +1,5 @@
 import io
 import shutil
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib.image as mpimg
@@ -11,6 +10,7 @@ import torch
 from neo.io import BlackrockIO
 from neo.io.proxyobjects import SpikeTrainProxy
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 
 def load_reach_to_grasp_spiketrains():
@@ -83,8 +83,8 @@ def extract_waveforms(spiketrains, per_unit=500, channels=[1], units='uV'):
     return waveforms, channel_units
 
 
-def _plot_single(waveform):
-    ax = plt.axes(facecolor='#E6E6E6')
+def _plot_single(waveform, ax):
+    ax.clear()
     ax.tick_params(axis='y', direction='in', pad=-15)
     ax.plot(waveform)
     ax.set_xticks([])
@@ -93,8 +93,7 @@ def _plot_single(waveform):
         plt.savefig(buf, format="png")
         buf.seek(0)
         image = mpimg.imread(buf, format='png')[:, :, :3]  # skip alpha
-        image = torch.from_numpy(image)
-    plt.close()
+    image = torch.from_numpy(image)
     return image
 
 
@@ -116,14 +115,12 @@ def create_figures(waveforms: torch.Tensor):
 
     plt.rcParams['figure.figsize'] = 0.8, 0.6
     plt.rcParams['font.size'] = 5
-    print("Creating figures")
-    with ProcessPoolExecutor() as executor:
-        label_img = executor.map(_plot_single, waveforms)
-
-    label_img = list(label_img)
-    label_img = torch.stack(label_img, dim=0)
-    label_img = label_img.permute(dims=(0, 3, 1, 2))
-    return label_img
+    ax = plt.axes(facecolor='#E6E6E6')
+    label_images = [_plot_single(waveform, ax) for waveform in
+                    tqdm(waveforms, desc="Creating figures")]
+    label_images = torch.stack(label_images, dim=0)
+    label_images = label_images.permute(dims=(0, 3, 1, 2))
+    return label_images
 
 
 def plot_embeddings():

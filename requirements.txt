@@ -4,3 +4,5 @@ quantities~=0.12.4
 neo~=0.8.0
 tensorboard~=2.2.1
 torch~=1.5.0
+pillow~=7.1.2
+tqdm
